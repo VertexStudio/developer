@@ -2,7 +2,8 @@ use anyhow::Result;
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::{self, EnvFilter};
 
-mod counter;
+pub mod counter;
+pub mod developer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,8 +15,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("Starting MCP server");
 
-    // Create an instance of our counter router
-    let service = counter::Counter::new()
+    // Create an instance of our developer service
+    let service = developer::Developer::new()
         .serve(stdio())
         .await
         .inspect_err(|e| {

@@ -3,8 +3,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use rmcp::{
-    Error as McpError, RoleServer, ServerHandler, model::*, schemars,
-    service::RequestContext, tool,
+    Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
