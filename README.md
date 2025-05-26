@@ -5,7 +5,7 @@ A general purpose Model Context Protocol (MCP) server that provides comprehensiv
 ## 🚀 Features
 
 ### 📝 Text Editor
-- **View files** with syntax highlighting detection
+- **View files** with language detection for markdown formatting
 - **Write/create files** with automatic directory creation
 - **String replacement** with precise matching
 - **Undo functionality** with edit history
