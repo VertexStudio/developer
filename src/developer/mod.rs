@@ -1,8 +1,10 @@
+use ignore::gitignore::GitignoreBuilder;
 use rmcp::{
     Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
 use serde_json::json;
 use std::env;
+use std::sync::Arc;
 
 pub mod image_processor;
 pub mod lang;
@@ -62,9 +64,28 @@ pub struct Developer {
 #[tool(tool_box)]
 impl Developer {
     pub fn new() -> Self {
+        let cwd = std::env::current_dir().expect("should have a current working dir");
+
+        // Initialize gitignore patterns from .gitignore files
+        let mut builder = GitignoreBuilder::new(&cwd);
+
+        // Add .gitignore file if it exists
+        let gitignore_path = cwd.join(".gitignore");
+        if gitignore_path.exists() {
+            let _ = builder.add(&gitignore_path);
+        }
+
+        // Build the ignore patterns
+        let ignore_patterns = Arc::new(builder.build().unwrap_or_else(|_| {
+            // Fallback to empty gitignore if building fails
+            GitignoreBuilder::new(&cwd)
+                .build()
+                .expect("Failed to create empty gitignore")
+        }));
+
         Self {
-            text_editor: TextEditor::new(),
-            shell: Shell::new(),
+            text_editor: TextEditor::new().with_ignore_patterns(ignore_patterns.clone()),
+            shell: Shell::new().with_ignore_patterns(ignore_patterns),
             screen_capture: ScreenCapture::new(),
             image_processor: ImageProcessor::new(),
         }
@@ -145,7 +166,9 @@ impl Developer {
                 let new_str = new_str.ok_or_else(|| {
                     McpError::invalid_params("new_str is required for str_replace command", None)
                 })?;
-                self.text_editor.str_replace(path_str, old_str, new_str).await
+                self.text_editor
+                    .str_replace(path_str, old_str, new_str)
+                    .await
             }
             "undo_edit" => self.text_editor.undo_edit(path_str).await,
             _ => Err(McpError::invalid_params(
@@ -204,7 +227,7 @@ impl Developer {
         // Validate and resolve the path
         let resolved_path = self.resolve_path(&path)?;
         let path_str = resolved_path.to_string_lossy().to_string();
-        
+
         self.image_processor.process(path_str).await
     }
 }
@@ -362,7 +385,7 @@ mod tests {
     #[test]
     fn test_resolve_path_absolute() {
         let developer = Developer::new();
-        
+
         if cfg!(windows) {
             let result = developer.resolve_path("C:\\test\\file.txt");
             assert!(result.is_ok());

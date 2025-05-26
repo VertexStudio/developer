@@ -75,10 +75,6 @@ impl Shell {
         }
     }
 
-
-
-
-
     fn check_ignore_patterns(&self, command: &str) -> Result<(), McpError> {
         if let Some(ignore_patterns) = &self.ignore_patterns {
             // Check if command might access ignored files and return early if it does
@@ -231,8 +227,4 @@ mod tests {
             assert_eq!(config.arg, "-c");
         }
     }
-
-
-
-
 }

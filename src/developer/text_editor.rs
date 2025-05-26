@@ -1,10 +1,11 @@
+use ignore::gitignore::Gitignore;
 use rmcp::{
     Error as McpError,
     model::CallToolResult,
     model::{Content, Role},
 };
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::developer::lang;
@@ -14,17 +15,43 @@ use crate::developer::normalize_line_endings;
 pub struct TextEditor {
     // Store file history for undo functionality
     file_history: Arc<Mutex<HashMap<PathBuf, Vec<String>>>>,
+    // Optional gitignore patterns for file access control
+    ignore_patterns: Option<Arc<Gitignore>>,
 }
 
 impl TextEditor {
     pub fn new() -> Self {
         Self {
             file_history: Arc::new(Mutex::new(HashMap::new())),
+            ignore_patterns: None,
         }
+    }
+
+    pub fn with_ignore_patterns(mut self, ignore_patterns: Arc<Gitignore>) -> Self {
+        self.ignore_patterns = Some(ignore_patterns);
+        self
+    }
+
+    fn check_ignore_patterns(&self, path: &Path) -> Result<(), McpError> {
+        if let Some(ignore_patterns) = &self.ignore_patterns {
+            if ignore_patterns.matched(path, false).is_ignore() {
+                return Err(McpError::invalid_request(
+                    format!(
+                        "The file '{}' is restricted by ignore patterns",
+                        path.display()
+                    ),
+                    None,
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub async fn view(&self, path: String) -> Result<CallToolResult, McpError> {
         let path = PathBuf::from(path);
+
+        // Check ignore patterns first
+        self.check_ignore_patterns(&path)?;
 
         if path.is_file() {
             // Check file size first (400KB limit)
@@ -88,6 +115,9 @@ impl TextEditor {
     pub async fn write(&self, path: String, file_text: String) -> Result<CallToolResult, McpError> {
         let path = PathBuf::from(path);
 
+        // Check ignore patterns first
+        self.check_ignore_patterns(&path)?;
+
         // Normalize line endings based on platform
         let normalized_text = normalize_line_endings(&file_text);
 
@@ -128,6 +158,9 @@ impl TextEditor {
         new_str: String,
     ) -> Result<CallToolResult, McpError> {
         let path = PathBuf::from(path);
+
+        // Check ignore patterns first
+        self.check_ignore_patterns(&path)?;
 
         // Check if file exists
         if !path.exists() {
@@ -215,6 +248,9 @@ impl TextEditor {
     pub async fn undo_edit(&self, path: String) -> Result<CallToolResult, McpError> {
         let path = PathBuf::from(path);
 
+        // Check ignore patterns first
+        self.check_ignore_patterns(&path)?;
+
         let mut history = self.file_history.lock().unwrap();
         if let Some(contents) = history.get_mut(&path) {
             if let Some(previous_content) = contents.pop() {
@@ -256,6 +292,7 @@ impl TextEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ignore::gitignore::GitignoreBuilder;
     use std::io::Write;
 
     #[tokio::test]
@@ -389,5 +426,69 @@ mod tests {
         if let Err(e) = result {
             assert!(e.to_string().contains("does not exist"));
         }
+    }
+
+    #[tokio::test]
+    async fn test_text_editor_with_ignore_patterns() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Create ignore patterns
+        let mut builder = GitignoreBuilder::new(temp_dir.path().to_path_buf());
+        builder.add_line(None, "secret.txt").unwrap();
+        builder.add_line(None, "*.env").unwrap();
+        let ignore_patterns = Arc::new(builder.build().unwrap());
+
+        let editor = TextEditor::new().with_ignore_patterns(ignore_patterns);
+
+        // Create ignored files
+        let secret_file = temp_dir.path().join("secret.txt");
+        let env_file = temp_dir.path().join("test.env");
+        let normal_file = temp_dir.path().join("normal.txt");
+
+        // Try to write to ignored files
+        let result = editor
+            .write(
+                secret_file.to_string_lossy().to_string(),
+                "secret content".to_string(),
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not be able to write to ignored file"
+        );
+        if let Err(e) = result {
+            assert!(e.to_string().contains("restricted by ignore patterns"));
+        }
+
+        let result = editor
+            .write(
+                env_file.to_string_lossy().to_string(),
+                "env content".to_string(),
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "Should not be able to write to ignored file"
+        );
+
+        // Should be able to write to normal file
+        let result = editor
+            .write(
+                normal_file.to_string_lossy().to_string(),
+                "normal content".to_string(),
+            )
+            .await;
+        assert!(result.is_ok(), "Should be able to write to normal file");
+
+        // Create the secret file externally and try to view it
+        std::fs::write(&secret_file, "secret content").unwrap();
+        let result = editor.view(secret_file.to_string_lossy().to_string()).await;
+        assert!(result.is_err(), "Should not be able to view ignored file");
+
+        // Should be able to view normal file
+        let result = editor.view(normal_file.to_string_lossy().to_string()).await;
+        assert!(result.is_ok(), "Should be able to view normal file");
+
+        temp_dir.close().unwrap();
     }
 }
