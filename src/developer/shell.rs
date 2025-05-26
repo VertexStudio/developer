@@ -121,12 +121,12 @@ impl Shell {
             .arg(cmd_with_redirect)
             .spawn()
             .map_err(|e| {
-                McpError::invalid_request(format!("Failed to spawn command: {}", e), None)
+                McpError::internal_error(format!("Failed to spawn command: {}", e), None)
             })?;
 
         // Wait for the command to complete and get output
         let output = child.wait_with_output().await.map_err(|e| {
-            McpError::invalid_request(format!("Failed to wait for command: {}", e), None)
+            McpError::internal_error(format!("Failed to wait for command: {}", e), None)
         })?;
 
         let stdout_str = String::from_utf8_lossy(&output.stdout);
@@ -147,7 +147,7 @@ impl Shell {
         const MAX_CHAR_COUNT: usize = 400_000; // 400KB
         let char_count = normalized_output.chars().count();
         if char_count > MAX_CHAR_COUNT {
-            return Err(McpError::invalid_request(
+            return Err(McpError::invalid_params(
                 format!(
                     "Shell output from command '{}' has too many characters ({}). Maximum character count is {}.",
                     command, char_count, MAX_CHAR_COUNT
