@@ -24,7 +24,7 @@ impl ScreenCapture {
 
             let window = windows
                 .into_iter()
-                .find(|w| w.title() == window_title)
+                .find(|w| w.title().map_or(false, |title| title == window_title))
                 .ok_or_else(|| {
                     McpError::invalid_params(
                         format!("No window found with title '{}'", window_title),
@@ -98,7 +98,7 @@ impl ScreenCapture {
             .map_err(|_| McpError::internal_error("Failed to list windows".to_string(), None))?;
 
         let window_titles: Vec<String> =
-            windows.into_iter().map(|w| w.title().to_string()).collect();
+            windows.into_iter().filter_map(|w| w.title().ok()).collect();
 
         let content = format!("Available windows:\n{}", window_titles.join("\n"));
         Ok(CallToolResult::success(vec![Content::text(content)]))

@@ -13,20 +13,18 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-schemars = { version = "0.8", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 axum = "0.8"
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = ["schemars", "transport-io"] }
 
 # Additional dependencies for developer module
-indoc = "2.0"
 include_dir = "0.7"
 ignore = "0.4"
 url = "2.5"
 shellexpand = "3.1"
 base64 = "0.22"
 image = "0.25"
-xcap = "0.0.12"
-serial_test = "3.1"
-tempfile = "3.10"
-regex = "1.10"
+xcap = "0.6"
+serial_test = "3.2"
+tempfile = "3.20"
+regex = "1.11"
