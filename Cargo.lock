@@ -2484,7 +2484,7 @@ checksum = "57397d16646700483b67d2dd6511d79318f9d057fdbd21a4066aeac8b41d310a"
 [[package]]
 name = "rmcp"
 version = "0.1.5"
-source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#23e8200a588905c115501a1f68efe0bb999434b0"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#d5a72e43c17d688086738030387af1cd39a9ce38"
 dependencies = [
  "base64",
  "chrono",
@@ -2504,7 +2504,7 @@ dependencies = [
 [[package]]
 name = "rmcp-macros"
 version = "0.1.5"
-source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#23e8200a588905c115501a1f68efe0bb999434b0"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#d5a72e43c17d688086738030387af1cd39a9ce38"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2798,9 +2798,9 @@ checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 
 [[package]]
 name = "socket2"
-version = "0.5.9"
+version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f5fd57c80058a56cf5c777ab8a126398ece8e442983605d280a44ce79d0edef"
+checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
