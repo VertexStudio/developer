@@ -79,9 +79,10 @@ impl ImageProcessor {
         if file_size > MAX_FILE_SIZE {
             return Err(McpError::invalid_params(
                 format!(
-                    "File '{}' is too large ({:.2}MB). Maximum size is 10MB.",
+                    "File '{}' is too large ({:.2}MB). Maximum size is {:.0}MB.",
                     path.display(),
-                    file_size as f64 / (1024.0 * 1024.0)
+                    file_size as f64 / (1024.0 * 1024.0),
+                    MAX_FILE_SIZE as f64 / (1024.0 * 1024.0)
                 ),
                 None,
             ));

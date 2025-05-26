@@ -250,6 +250,19 @@ cargo build
 # Use target/debug/developer in your configuration
 ```
 
+### MCP Inspector
+
+Use the official MCP inspector to debug and test tools:
+```bash
+npx @modelcontextprotocol/inspector target/debug/developer
+```
+
+This will open a web interface where you can:
+- Inspect available tools and their schemas
+- Test tool calls interactively
+- Debug server responses
+- Validate MCP protocol compliance
+
 ## 🤝 Contributing
 
 1. Fork the repository
