@@ -1,5 +1,9 @@
 use base64::Engine;
-use rmcp::{Error as McpError, model::CallToolResult, model::Content};
+use rmcp::{
+    Error as McpError,
+    model::CallToolResult,
+    model::{Content, Role},
+};
 use std::io::Cursor;
 use xcap::{Monitor, Window};
 
@@ -88,8 +92,8 @@ impl ScreenCapture {
         let data = base64::prelude::BASE64_STANDARD.encode(bytes);
 
         Ok(CallToolResult::success(vec![
-            Content::text("Screenshot captured".to_string()),
-            Content::image(data, "image/png".to_string()),
+            Content::text("Screenshot captured").with_audience(vec![Role::Assistant]),
+            Content::image(data, "image/png").with_priority(0.0),
         ]))
     }
 
@@ -97,11 +101,34 @@ impl ScreenCapture {
         let windows = Window::all()
             .map_err(|_| McpError::internal_error("Failed to list windows".to_string(), None))?;
 
-        let window_titles: Vec<String> =
-            windows.into_iter().filter_map(|w| w.title().ok()).collect();
+        let mut window_info: Vec<String> = Vec::new();
 
-        let content = format!("Available windows:\n{}", window_titles.join("\n"));
-        Ok(CallToolResult::success(vec![Content::text(content)]))
+        for window in windows.iter() {
+            // Skip minimized windows as they can't be captured anyway
+            if window.is_minimized().unwrap_or(false) {
+                continue;
+            }
+
+            let title = window.title().unwrap_or_else(|_| "<No Title>".to_string());
+
+            // Only add non-empty titles
+            if !title.is_empty() && title != "<No Title>" {
+                window_info.push(title);
+            }
+        }
+
+        let content = if window_info.is_empty() {
+            "No windows found".to_string()
+        } else {
+            format!("Available windows:\n{}", window_info.join("\n"))
+        };
+
+        Ok(CallToolResult::success(vec![
+            Content::text(content.clone()).with_audience(vec![Role::Assistant]),
+            Content::text(content)
+                .with_audience(vec![Role::User])
+                .with_priority(0.0),
+        ]))
     }
 }
 
@@ -115,6 +142,35 @@ mod tests {
         let result = screen_capture.list_windows().await;
         assert!(result.is_ok());
         let call_result = result.unwrap();
+        assert!(!call_result.content.is_empty());
+
+        // Print the window list to see what's detected
+        // Re-create the window list for printing
+        let windows = Window::all().unwrap();
+        let mut window_titles: Vec<String> = Vec::new();
+
+        for window in windows.iter() {
+            if window.is_minimized().unwrap_or(false) {
+                continue;
+            }
+            let title = window.title().unwrap_or_else(|_| "<No Title>".to_string());
+            if !title.is_empty() && title != "<No Title>" {
+                window_titles.push(title);
+            }
+        }
+
+        println!("=== WINDOW LIST ===");
+        if window_titles.is_empty() {
+            println!("No windows found");
+        } else {
+            println!("Available windows:");
+            for title in window_titles {
+                println!("{}", title);
+            }
+        }
+        println!("=== END WINDOW LIST ===");
+
+        // Check that the content includes window information
         assert!(!call_result.content.is_empty());
     }
 

@@ -1,5 +1,9 @@
 use base64::Engine;
-use rmcp::{Error as McpError, model::CallToolResult, model::Content};
+use rmcp::{
+    Error as McpError,
+    model::CallToolResult,
+    model::{Content, Role},
+};
 use std::{io::Cursor, path::Path};
 
 #[derive(Clone)]
@@ -116,8 +120,9 @@ impl ImageProcessor {
             Content::text(format!(
                 "Successfully processed image from {}",
                 path.display()
-            )),
-            Content::image(data, "image/png".to_string()),
+            ))
+            .with_audience(vec![Role::Assistant]),
+            Content::image(data, "image/png".to_string()).with_priority(0.0),
         ]))
     }
 }

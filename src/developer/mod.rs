@@ -2,6 +2,7 @@ use rmcp::{
     Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
 };
 use serde_json::json;
+use std::env;
 
 pub mod image_processor;
 pub mod lang;
@@ -13,6 +14,42 @@ pub use image_processor::ImageProcessor;
 pub use screen_capture::ScreenCapture;
 pub use shell::Shell;
 pub use text_editor::TextEditor;
+
+// Path utility functions
+pub(crate) fn expand_path(path_str: &str) -> String {
+    if cfg!(windows) {
+        // Expand Windows environment variables (%VAR%)
+        let with_userprofile = path_str.replace(
+            "%USERPROFILE%",
+            &env::var("USERPROFILE").unwrap_or_default(),
+        );
+        // Add more Windows environment variables as needed
+        with_userprofile.replace("%APPDATA%", &env::var("APPDATA").unwrap_or_default())
+    } else {
+        // Unix-style expansion
+        shellexpand::tilde(path_str).into_owned()
+    }
+}
+
+pub(crate) fn is_absolute_path(path_str: &str) -> bool {
+    if cfg!(windows) {
+        // Check for Windows absolute paths (drive letters and UNC)
+        path_str.contains(":\\") || path_str.starts_with("\\\\")
+    } else {
+        // Unix absolute paths start with /
+        path_str.starts_with('/')
+    }
+}
+
+pub(crate) fn normalize_line_endings(text: &str) -> String {
+    if cfg!(windows) {
+        // Ensure CRLF line endings on Windows
+        text.replace("\r\n", "\n").replace("\n", "\r\n")
+    } else {
+        // Ensure LF line endings on Unix
+        text.replace("\r\n", "\n")
+    }
+}
 
 #[derive(Clone)]
 pub struct Developer {
@@ -44,6 +81,27 @@ impl Developer {
         }
     }
 
+    // Helper method to resolve a path relative to cwd with platform-specific handling
+    fn resolve_path(&self, path_str: &str) -> Result<std::path::PathBuf, McpError> {
+        let cwd = std::env::current_dir().expect("should have a current working dir");
+        let expanded = expand_path(path_str);
+        let path = std::path::Path::new(&expanded);
+
+        let suggestion = cwd.join(path);
+
+        match is_absolute_path(&expanded) {
+            true => Ok(path.to_path_buf()),
+            false => Err(McpError::invalid_params(
+                format!(
+                    "The path {} is not an absolute path, did you possibly mean {}?",
+                    path_str,
+                    suggestion.to_string_lossy(),
+                ),
+                None,
+            )),
+        }
+    }
+
     // Text Editor Tool
     #[tool(description = include_str!("descriptions/text_editor.md"))]
     async fn text_editor(
@@ -68,13 +126,17 @@ impl Developer {
         #[schemars(description = "New string to replace with (required for str_replace command)")]
         new_str: Option<String>,
     ) -> Result<CallToolResult, McpError> {
+        // Validate and resolve the path
+        let resolved_path = self.resolve_path(&path)?;
+        let path_str = resolved_path.to_string_lossy().to_string();
+
         match command.as_str() {
-            "view" => self.text_editor.view(path).await,
+            "view" => self.text_editor.view(path_str).await,
             "write" => {
                 let file_text = file_text.ok_or_else(|| {
                     McpError::invalid_params("file_text is required for write command", None)
                 })?;
-                self.text_editor.write(path, file_text).await
+                self.text_editor.write(path_str, file_text).await
             }
             "str_replace" => {
                 let old_str = old_str.ok_or_else(|| {
@@ -83,9 +145,9 @@ impl Developer {
                 let new_str = new_str.ok_or_else(|| {
                     McpError::invalid_params("new_str is required for str_replace command", None)
                 })?;
-                self.text_editor.str_replace(path, old_str, new_str).await
+                self.text_editor.str_replace(path_str, old_str, new_str).await
             }
-            "undo_edit" => self.text_editor.undo_edit(path).await,
+            "undo_edit" => self.text_editor.undo_edit(path_str).await,
             _ => Err(McpError::invalid_params(
                 "Unknown command. Allowed commands are: view, write, str_replace, undo_edit",
                 None,
@@ -139,7 +201,11 @@ impl Developer {
         #[schemars(description = "Absolute path to the image file to process")]
         path: String,
     ) -> Result<CallToolResult, McpError> {
-        self.image_processor.process(path).await
+        // Validate and resolve the path
+        let resolved_path = self.resolve_path(&path)?;
+        let path_str = resolved_path.to_string_lossy().to_string();
+        
+        self.image_processor.process(path_str).await
     }
 }
 
@@ -291,6 +357,74 @@ mod tests {
         assert!(info.capabilities.tools.is_some());
         assert!(info.capabilities.prompts.is_some());
         assert!(info.capabilities.resources.is_some());
+    }
+
+    #[test]
+    fn test_resolve_path_absolute() {
+        let developer = Developer::new();
+        
+        if cfg!(windows) {
+            let result = developer.resolve_path("C:\\test\\file.txt");
+            assert!(result.is_ok());
+            let path = result.unwrap();
+            assert_eq!(path.to_string_lossy(), "C:\\test\\file.txt");
+        } else {
+            let result = developer.resolve_path("/test/file.txt");
+            assert!(result.is_ok());
+            let path = result.unwrap();
+            assert_eq!(path.to_string_lossy(), "/test/file.txt");
+        }
+    }
+
+    #[test]
+    fn test_resolve_path_relative_error() {
+        let developer = Developer::new();
+        let result = developer.resolve_path("relative/path.txt");
+        assert!(result.is_err());
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            assert!(error_msg.contains("not an absolute path"));
+            assert!(error_msg.contains("did you possibly mean"));
+        }
+    }
+
+    #[test]
+    fn test_expand_path() {
+        if cfg!(windows) {
+            // Test Windows path expansion
+            let path = "%USERPROFILE%\\test";
+            let expanded = expand_path(path);
+            assert!(!expanded.contains("%USERPROFILE%"));
+        } else {
+            // Test Unix path expansion
+            let path = "~/test";
+            let expanded = expand_path(path);
+            assert!(!expanded.starts_with('~'));
+        }
+    }
+
+    #[test]
+    fn test_is_absolute_path() {
+        if cfg!(windows) {
+            assert!(is_absolute_path("C:\\test"));
+            assert!(is_absolute_path("\\\\server\\share"));
+            assert!(!is_absolute_path("relative\\path"));
+        } else {
+            assert!(is_absolute_path("/absolute/path"));
+            assert!(!is_absolute_path("relative/path"));
+        }
+    }
+
+    #[test]
+    fn test_normalize_line_endings() {
+        let input = "line1\r\nline2\nline3";
+        let normalized = normalize_line_endings(input);
+
+        if cfg!(windows) {
+            assert_eq!(normalized, "line1\r\nline2\r\nline3");
+        } else {
+            assert_eq!(normalized, "line1\nline2\nline3");
+        }
     }
 
     // Note: RequestContext tests are complex due to the structure requirements

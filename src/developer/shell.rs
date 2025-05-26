@@ -1,9 +1,16 @@
 use anyhow::Result;
 use ignore::gitignore::Gitignore;
-use rmcp::{Error as McpError, model::CallToolResult, model::Content};
+use rmcp::{
+    Error as McpError,
+    model::CallToolResult,
+    model::{Content, Role},
+};
 
 use std::{env, path::Path, process::Stdio, sync::Arc};
 use tokio::process::Command;
+
+// Import utilities from parent module
+use crate::developer::normalize_line_endings;
 
 #[derive(Debug, Clone)]
 pub struct ShellConfig {
@@ -22,8 +29,10 @@ impl Default for ShellConfig {
                 redirect_syntax: "2>&1".to_string(),
             }
         } else {
+            // Use the user's preferred shell from the SHELL environment variable
+            let shell = env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
             Self {
-                executable: "bash".to_string(),
+                executable: shell,
                 arg: "-c".to_string(),
                 redirect_syntax: "2>&1".to_string(),
             }
@@ -66,40 +75,9 @@ impl Shell {
         }
     }
 
-    pub fn expand_path(&self, path_str: &str) -> String {
-        if cfg!(windows) {
-            // Expand Windows environment variables (%VAR%)
-            let with_userprofile = path_str.replace(
-                "%USERPROFILE%",
-                &env::var("USERPROFILE").unwrap_or_default(),
-            );
-            // Add more Windows environment variables as needed
-            with_userprofile.replace("%APPDATA%", &env::var("APPDATA").unwrap_or_default())
-        } else {
-            // Unix-style expansion
-            shellexpand::tilde(path_str).into_owned()
-        }
-    }
 
-    pub fn is_absolute_path(&self, path_str: &str) -> bool {
-        if cfg!(windows) {
-            // Check for Windows absolute paths (drive letters and UNC)
-            path_str.contains(":\\") || path_str.starts_with("\\\\")
-        } else {
-            // Unix absolute paths start with /
-            path_str.starts_with('/')
-        }
-    }
 
-    pub fn normalize_line_endings(&self, text: &str) -> String {
-        if cfg!(windows) {
-            // Ensure CRLF line endings on Windows
-            text.replace("\r\n", "\n").replace("\n", "\r\n")
-        } else {
-            // Ensure LF line endings on Unix
-            text.replace("\r\n", "\n")
-        }
-    }
+
 
     fn check_ignore_patterns(&self, command: &str) -> Result<(), McpError> {
         if let Some(ignore_patterns) = &self.ignore_patterns {
@@ -167,7 +145,7 @@ impl Shell {
             format!("{}{}", stdout_str, stderr_str)
         };
 
-        let normalized_output = self.normalize_line_endings(&combined_output);
+        let normalized_output = normalize_line_endings(&combined_output);
 
         // Check the character count of the output
         const MAX_CHAR_COUNT: usize = 400_000; // 400KB
@@ -182,23 +160,12 @@ impl Shell {
             ));
         }
 
-        // Include exit status information
-        let status_info = if output.status.success() {
-            "Command completed successfully".to_string()
-        } else {
-            format!(
-                "Command failed with exit code: {}",
-                output.status.code().unwrap_or(-1)
-            )
-        };
-
-        let final_output = if normalized_output.is_empty() {
-            status_info
-        } else {
-            format!("{}\n\n{}", normalized_output.trim(), status_info)
-        };
-
-        Ok(CallToolResult::success(vec![Content::text(final_output)]))
+        Ok(CallToolResult::success(vec![
+            Content::text(normalized_output.clone()).with_audience(vec![Role::Assistant]),
+            Content::text(normalized_output)
+                .with_audience(vec![Role::User])
+                .with_priority(0.0),
+        ]))
     }
 }
 
@@ -258,52 +225,14 @@ mod tests {
             assert_eq!(config.executable, "powershell.exe");
             assert!(config.arg.contains("-NoProfile"));
         } else {
-            assert_eq!(config.executable, "bash");
+            // Check that it uses the SHELL environment variable or defaults to bash
+            let expected_shell = env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
+            assert_eq!(config.executable, expected_shell);
             assert_eq!(config.arg, "-c");
         }
     }
 
-    #[test]
-    fn test_path_expansion() {
-        let shell = Shell::new();
 
-        if cfg!(windows) {
-            // Test Windows path expansion
-            let path = "%USERPROFILE%\\test";
-            let expanded = shell.expand_path(path);
-            assert!(!expanded.contains("%USERPROFILE%"));
-        } else {
-            // Test Unix path expansion
-            let path = "~/test";
-            let expanded = shell.expand_path(path);
-            assert!(!expanded.starts_with('~'));
-        }
-    }
 
-    #[test]
-    fn test_absolute_path_detection() {
-        let shell = Shell::new();
 
-        if cfg!(windows) {
-            assert!(shell.is_absolute_path("C:\\test"));
-            assert!(shell.is_absolute_path("\\\\server\\share"));
-            assert!(!shell.is_absolute_path("relative\\path"));
-        } else {
-            assert!(shell.is_absolute_path("/absolute/path"));
-            assert!(!shell.is_absolute_path("relative/path"));
-        }
-    }
-
-    #[test]
-    fn test_line_ending_normalization() {
-        let shell = Shell::new();
-        let input = "line1\r\nline2\nline3";
-        let normalized = shell.normalize_line_endings(input);
-
-        if cfg!(windows) {
-            assert_eq!(normalized, "line1\r\nline2\r\nline3");
-        } else {
-            assert_eq!(normalized, "line1\nline2\nline3");
-        }
-    }
 }

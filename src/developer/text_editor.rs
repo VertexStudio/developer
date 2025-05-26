@@ -1,18 +1,14 @@
-use rmcp::{Error as McpError, model::CallToolResult, model::Content};
+use rmcp::{
+    Error as McpError,
+    model::CallToolResult,
+    model::{Content, Role},
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::developer::lang;
-
-/// Normalize line endings based on platform
-fn normalize_line_endings(text: &str) -> String {
-    if cfg!(windows) {
-        text.replace('\n', "\r\n")
-    } else {
-        text.replace("\r\n", "\n")
-    }
-}
+use crate::developer::normalize_line_endings;
 
 #[derive(Clone)]
 pub struct TextEditor {
@@ -72,7 +68,12 @@ impl TextEditor {
             let language = lang::get_language_identifier(&path);
             let formatted = format!("### {}\n```{}\n{}\n```", path.display(), language, content);
 
-            Ok(CallToolResult::success(vec![Content::text(formatted)]))
+            Ok(CallToolResult::success(vec![
+                Content::text(formatted.clone()).with_audience(vec![Role::Assistant]),
+                Content::text(formatted)
+                    .with_audience(vec![Role::User])
+                    .with_priority(0.0),
+            ]))
         } else {
             Err(McpError::invalid_params(
                 format!(
@@ -104,15 +105,20 @@ impl TextEditor {
         // Try to detect the language from the file extension
         let language = lang::get_language_identifier(&path);
 
+        let success_message = format!("Successfully wrote to {}", path.display());
         let formatted = format!(
-            "Successfully wrote to {}\n\n### {}\n```{}\n{}\n```",
-            path.display(),
+            "### {}\n```{}\n{}\n```",
             path.display(),
             language,
             file_text
         );
 
-        Ok(CallToolResult::success(vec![Content::text(formatted)]))
+        Ok(CallToolResult::success(vec![
+            Content::text(success_message).with_audience(vec![Role::Assistant]),
+            Content::text(formatted)
+                .with_audience(vec![Role::User])
+                .with_priority(0.2),
+        ]))
     }
 
     pub async fn str_replace(
@@ -198,9 +204,12 @@ impl TextEditor {
             output
         );
 
-        Ok(CallToolResult::success(vec![Content::text(
-            success_message,
-        )]))
+        Ok(CallToolResult::success(vec![
+            Content::text(success_message).with_audience(vec![Role::Assistant]),
+            Content::text(output)
+                .with_audience(vec![Role::User])
+                .with_priority(0.2),
+        ]))
     }
 
     pub async fn undo_edit(&self, path: String) -> Result<CallToolResult, McpError> {
@@ -214,7 +223,7 @@ impl TextEditor {
                     McpError::internal_error(format!("Failed to write file: {}", e), None)
                 })?;
                 Ok(CallToolResult::success(vec![Content::text(
-                    "Undid the last edit".to_string(),
+                    "Undid the last edit",
                 )]))
             } else {
                 Err(McpError::invalid_params(
