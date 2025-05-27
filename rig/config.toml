@@ -1,0 +1,7 @@
+[mcp]
+
+[[mcp.server]]
+name = "developer"
+protocol = "stdio"
+command = "cargo"
+args = ["run", "--bin", "developer"]

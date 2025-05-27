@@ -1,0 +1,32 @@
+[package]
+name = "rig"
+edition = { workspace = true }
+version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+description = { workspace = true }
+keywords = { workspace = true }
+homepage = { workspace = true }
+categories = { workspace = true }
+readme = { workspace = true }
+
+[[bin]]
+name = "rig"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rmcp = { workspace = true }
+
+# Package-specific dependencies
+rig-core = "0.12.0"
+toml = { workspace = true }
+futures = { workspace = true }
+tracing-appender = { workspace = true }
