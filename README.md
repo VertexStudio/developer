@@ -263,6 +263,17 @@ This will open a web interface where you can:
 - Debug server responses
 - Validate MCP protocol compliance
 
+### Tools Schema Export
+
+Export the tools JSON schema for debugging or integration:
+```bash
+# Save tools schema to file
+cargo run toolbox > tools.json
+
+# Pretty print tools schema
+cargo run toolbox | jq .
+```
+
 ## 🤝 Contributing
 
 1. Fork the repository
