@@ -40,6 +40,7 @@ pub struct Workflow {
     state: Arc<Mutex<WorkflowState>>,
     allow_branches: bool,
     max_steps: Option<i32>,
+    log_steps: bool,
 }
 
 impl Default for Workflow {
@@ -48,26 +49,37 @@ impl Default for Workflow {
             state: Arc::new(Mutex::new(WorkflowState::default())),
             allow_branches: true,
             max_steps: None,
+            log_steps: true,
         }
     }
 }
 
 impl Workflow {
-    pub fn new(allow_branches: bool, max_steps: Option<i32>) -> Self {
+    pub fn new(allow_branches: bool, max_steps: Option<i32>, log_steps: bool) -> Self {
         Self {
             state: Arc::new(Mutex::new(WorkflowState::default())),
             allow_branches,
             max_steps,
+            log_steps,
         }
     }
 
     pub async fn execute_step(&self, args: WorkflowStep) -> Result<CallToolResult, McpError> {
+        // Optional: Log the received arguments at the beginning
+        if self.log_steps {
+            tracing::debug!(workflow_step_args = ?args, "Workflow step arguments received");
+        }
+
         if let Some(max) = self.max_steps {
             if args.step_number > max {
-                return Ok(Self::error(format!(
+                let error_msg = format!(
                     "Step number {} exceeds configured maximum of {}",
                     args.step_number, max
-                )));
+                );
+                if self.log_steps {
+                    tracing::warn!(error_msg, "Workflow step validation error");
+                }
+                return Ok(Self::error(error_msg));
             }
         }
 
@@ -75,35 +87,63 @@ impl Workflow {
 
         let mut step_data = args.clone();
         if step_data.step_number > step_data.total_steps {
+            // Log this adjustment if desired
+            if self.log_steps {
+                tracing::info!(
+                    old_total_steps = step_data.total_steps,
+                    new_total_steps = step_data.step_number,
+                    step_number = step_data.step_number,
+                    "Adjusting total_steps to match current step_number as it was greater."
+                );
+            }
             step_data.total_steps = step_data.step_number;
         }
 
         if step_data.revises_step.is_some() && step_data.is_step_revision.is_none() {
-            return Ok(Self::error(
-                "When specifying revises_step, is_step_revision must be set to true",
-            ));
+            let error_msg = "When specifying revises_step, is_step_revision must be set to true";
+            if self.log_steps {
+                tracing::warn!(error_msg, invalid_revision_args = ?step_data, "Workflow step validation error");
+            }
+            return Ok(Self::error(error_msg));
         }
 
         if step_data.branch_id.is_some() && step_data.branch_from_step.is_none() {
-            return Ok(Self::error(
-                "When creating a branch (branch_id), you must specify branch_from_step",
-            ));
+            let error_msg = "When creating a branch (branch_id), you must specify branch_from_step";
+            if self.log_steps {
+                tracing::warn!(error_msg, invalid_branch_args = ?step_data, "Workflow step validation error");
+            }
+            return Ok(Self::error(error_msg));
         }
 
         if let (Some(branch_id), Some(branch_from_step)) =
             (&step_data.branch_id, &step_data.branch_from_step)
         {
             if !self.allow_branches {
-                return Ok(Self::error(
-                    "Branching is disabled in current configuration",
-                ));
+                let error_msg = "Branching is disabled in current configuration";
+                if self.log_steps {
+                    tracing::warn!(error_msg, "Workflow branching validation error");
+                }
+                return Ok(Self::error(error_msg));
             }
 
             if *branch_from_step <= 0 || *branch_from_step > state.step_history.len() as i32 {
-                return Ok(Self::error(format!(
+                let error_msg = format!(
                     "branch_from_step {} does not exist in step history",
                     branch_from_step
-                )));
+                );
+                if self.log_steps {
+                    tracing::warn!(error_msg, "Workflow branching validation error");
+                }
+                return Ok(Self::error(error_msg));
+            }
+
+            if self.log_steps {
+                tracing::info!(
+                    branch_id,
+                    branch_from_step,
+                    step_number = step_data.step_number,
+                    "Processing branch step."
+                );
             }
 
             state.current_branch = Some(branch_id.clone());
@@ -113,16 +153,44 @@ impl Workflow {
                 .or_default()
                 .push(step_data.clone());
         } else if state.current_branch.is_some() && step_data.branch_id.is_none() {
+            if self.log_steps {
+                tracing::info!(
+                    previous_branch = ?state.current_branch,
+                    step_number = step_data.step_number,
+                    "Moving from branch back to main history (or default)."
+                );
+            }
             state.current_branch = None;
         }
 
         state.step_history.push(step_data.clone());
 
-        let response = self.build_workflow_status(&state, &step_data).await;
+        // Log before returning success
+        if self.log_steps {
+            tracing::info!(
+                step_number = step_data.step_number,
+                total_steps = step_data.total_steps,
+                description = step_data.step_description.as_str(),
+                is_revision = step_data.is_step_revision,
+                revises_step = step_data.revises_step,
+                branch_id = step_data.branch_id.as_deref(),
+                next_step_needed = step_data.next_step_needed,
+                needs_more_steps = step_data.needs_more_steps,
+                "Workflow step processed successfully."
+            );
+        }
 
-        match serde_json::to_string_pretty(&response) {
+        let response_status = self.build_workflow_status(&state, &step_data).await;
+
+        match serde_json::to_string_pretty(&response_status) {
             Ok(json_response) => Ok(Self::success(json_response)),
-            Err(e) => Ok(Self::error(format!("Failed to serialize response: {}", e))),
+            Err(e) => {
+                // Also log serialization errors
+                if self.log_steps {
+                    tracing::error!(error = %e, "Failed to serialize workflow status response");
+                }
+                Ok(Self::error(format!("Failed to serialize response: {}", e)))
+            }
         }
     }
 
@@ -235,18 +303,20 @@ mod tests {
 
     #[test]
     fn test_workflow_creation() {
-        let tool = Workflow::new(true, Some(10));
+        let tool = Workflow::new(true, Some(10), true);
         assert_eq!(tool.allow_branches, true);
         assert_eq!(tool.max_steps, Some(10));
+        assert_eq!(tool.log_steps, true);
 
         let default_tool = Workflow::default();
         assert_eq!(default_tool.allow_branches, true);
         assert_eq!(default_tool.max_steps, None);
+        assert_eq!(default_tool.log_steps, true);
     }
 
     #[tokio::test]
     async fn test_error_conditions() {
-        let tool = Workflow::new(false, Some(2)); // No branching, max 2 steps
+        let tool = Workflow::new(false, Some(2), false); // No branching, max 2 steps, no logging for test
 
         // Test max steps exceeded
         let step = WorkflowStep {

@@ -91,7 +91,7 @@ impl Developer {
             shell: Shell::new().with_ignore_patterns(ignore_patterns),
             screen_capture: ScreenCapture::new(),
             image_processor: ImageProcessor::new(),
-            workflow: Workflow::default(),
+            workflow: Workflow::new(true, None, true),
         }
     }
 
@@ -256,32 +256,44 @@ impl Developer {
         #[schemars(description = "Detailed description of what this step accomplishes")]
         step_description: String,
         #[tool(param)]
-        #[schemars(description = "Current position in the workflow sequence (e.g., 1 for first step)")]
+        #[schemars(
+            description = "Current position in the workflow sequence (e.g., 1 for first step)"
+        )]
         step_number: i32,
         #[tool(param)]
         #[schemars(description = "Estimated total number of steps in the complete workflow")]
         total_steps: i32,
         #[tool(param)]
-        #[schemars(description = "Set to true if another step will follow this one, false if this is the final step")]
+        #[schemars(
+            description = "Set to true if another step will follow this one, false if this is the final step"
+        )]
         next_step_needed: bool,
         #[tool(param)]
         #[schemars(description = "Set to true if this step revises a previous step")]
         is_step_revision: Option<bool>,
         #[tool(param)]
-        #[schemars(description = "If revising a previous step, specify which step number is being revised")]
+        #[schemars(
+            description = "If revising a previous step, specify which step number is being revised"
+        )]
         revises_step: Option<i32>,
         #[tool(param)]
-        #[schemars(description = "If creating a branch, specify which step number this branch starts from")]
+        #[schemars(
+            description = "If creating a branch, specify which step number this branch starts from"
+        )]
         branch_from_step: Option<i32>,
         #[tool(param)]
-        #[schemars(description = "A unique identifier for this branch (required when creating a branch)")]
+        #[schemars(
+            description = "A unique identifier for this branch (required when creating a branch)"
+        )]
         branch_id: Option<String>,
         #[tool(param)]
-        #[schemars(description = "Indicates whether additional steps are required to complete the workflow")]
+        #[schemars(
+            description = "Indicates whether additional steps are required to complete the workflow"
+        )]
         needs_more_steps: Option<bool>,
     ) -> Result<CallToolResult, McpError> {
         use workflow::WorkflowStep;
-        
+
         let step = WorkflowStep {
             step_description,
             step_number,
@@ -296,8 +308,6 @@ impl Developer {
 
         self.workflow.execute_step(step).await
     }
-
-
 }
 
 #[tool(tool_box)]
