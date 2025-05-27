@@ -33,7 +33,6 @@ A general purpose Model Context Protocol (MCP) server that provides comprehensiv
 - **Multi-step problem solving** with sequential progression
 - **Branching workflows** for alternative solution paths
 - **Step revision** capability to update previous steps
-
 - **Context preservation** across complex reasoning processes
 
 ### 🔒 Security Features
