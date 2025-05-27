@@ -29,6 +29,13 @@ A general purpose Model Context Protocol (MCP) server that provides comprehensiv
 - **Format conversion** to PNG
 - **macOS screenshot filename handling**
 
+### 🔄 Workflow Management
+- **Multi-step problem solving** with sequential progression
+- **Branching workflows** for alternative solution paths
+- **Step revision** capability to update previous steps
+
+- **Context preservation** across complex reasoning processes
+
 ### 🔒 Security Features
 - **Gitignore integration** - respects `.gitignore` patterns for file access control
 - **Path validation** - requires absolute paths to prevent directory traversal
@@ -187,6 +194,15 @@ Once configured, you can use these tools directly in Claude Desktop:
 "Load and display the image from /Users/me/Desktop/diagram.jpg"
 ```
 
+### Workflow Management
+```
+"Start a workflow to implement a new feature with 5 steps"
+
+"Create a branch from step 3 to explore an alternative approach"
+
+"Revise step 2 to use a different algorithm"
+```
+
 ## 🏗️ Architecture
 
 ```
@@ -195,6 +211,7 @@ Developer MCP Server
 ├── Shell           → Cross-platform command execution  
 ├── Screen Capture  → Display and window screenshots
 ├── Image Processor → File-based image processing
+├── Workflow        → Multi-step problem solving with branching
 └── Security Layer  → Gitignore integration, path validation
 ```
 
@@ -222,6 +239,11 @@ Developer MCP Server
 - **Parameters:** `path` (required)
 - **Features:** Auto-resize, format conversion, macOS compatibility
 - **Limits:** 10MB file size
+
+### workflow
+- **Parameters:** `step_description`, `step_number`, `total_steps`, `next_step_needed` (required), `is_step_revision`, `revises_step`, `branch_from_step`, `branch_id`, `needs_more_steps` (optional)
+- **Features:** Sequential progression, branching, step revision
+- **Output:** JSON workflow status
 
 ## 🐛 Troubleshooting
 
