@@ -91,6 +91,19 @@ impl Developer {
         }
     }
 
+    pub fn get_tools_schema_as_json() -> String {
+        let tools: Vec<rmcp::model::Tool> = Self::tool_box().list();
+        match serde_json::to_string_pretty(&tools) {
+            Ok(json_string) => json_string,
+            Err(e) => {
+                format!(
+                    "{{\"error\": \"Failed to serialize tools to JSON: {}\"}}",
+                    e
+                )
+            }
+        }
+    }
+
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
         RawResource::new(uri, name.to_string()).no_annotation()
     }

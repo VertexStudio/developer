@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::{self, EnvFilter};
 
@@ -11,28 +11,49 @@ pub mod developer;
 #[command(about = "A developer MCP server")]
 #[command(version)]
 struct Cli {
-    // No commands for now, just basic CLI structure
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Output the tools JSON schema
+    Toolbox,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _cli = Cli::parse();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()))
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
-        .init();
+    let cli = Cli::parse();
 
-    tracing::info!("Starting MCP server");
+    match cli.command {
+        Some(Commands::Toolbox) => {
+            // Output only the tools JSON schema, no logging or other output
+            let tools_schema = developer::Developer::get_tools_schema_as_json();
+            println!("{}", tools_schema);
+            return Ok(());
+        }
+        None => {
+            // Default behavior - start the MCP server
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    EnvFilter::from_default_env().add_directive(tracing::Level::DEBUG.into()),
+                )
+                .with_writer(std::io::stderr)
+                .with_ansi(false)
+                .init();
 
-    // Create an instance of our developer service
-    let service = developer::Developer::new()
-        .serve(stdio())
-        .await
-        .inspect_err(|e| {
-            tracing::error!("serving error: {:?}", e);
-        })?;
+            tracing::info!("Starting MCP server");
 
-    service.waiting().await?;
+            let server = developer::Developer::new();
+
+            // Create an instance of our developer service
+            let service = server.serve(stdio()).await.inspect_err(|e| {
+                tracing::error!("serving error: {:?}", e);
+            })?;
+
+            service.waiting().await?;
+        }
+    }
+
     Ok(())
 }
