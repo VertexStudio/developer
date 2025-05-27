@@ -11,12 +11,17 @@ use std::sync::{Arc, Mutex};
 use crate::developer::lang;
 use crate::developer::normalize_line_endings;
 
+const DEFAULT_MAX_UNDO_HISTORY: usize = 10;
+const MAX_WRITE_CHAR_COUNT: usize = 400_000;
+
 #[derive(Clone)]
 pub struct TextEditor {
     // Store file history for undo functionality
     file_history: Arc<Mutex<HashMap<PathBuf, Vec<String>>>>,
     // Optional gitignore patterns for file access control
     ignore_patterns: Option<Arc<Gitignore>>,
+    // Maximum number of undo states to keep per file
+    max_history_per_file: usize,
 }
 
 impl TextEditor {
@@ -24,6 +29,15 @@ impl TextEditor {
         Self {
             file_history: Arc::new(Mutex::new(HashMap::new())),
             ignore_patterns: None,
+            max_history_per_file: DEFAULT_MAX_UNDO_HISTORY,
+        }
+    }
+
+    pub fn new_with_history_limit(max_history: usize) -> Self {
+        Self {
+            file_history: Arc::new(Mutex::new(HashMap::new())),
+            ignore_patterns: None,
+            max_history_per_file: max_history,
         }
     }
 
@@ -118,6 +132,33 @@ impl TextEditor {
         // Check ignore patterns first
         self.check_ignore_patterns(&path)?;
 
+        // Check if path is an existing directory
+        if path.is_dir() {
+            return Err(McpError::invalid_params(
+                format!(
+                    "The path '{}' is an existing directory. The 'write' command can only target files.",
+                    path.display()
+                ),
+                None,
+            ));
+        }
+
+        // Check character count limit
+        if file_text.chars().count() > MAX_WRITE_CHAR_COUNT {
+            return Err(McpError::invalid_params(
+                format!(
+                    "Input content for '{}' has too many characters ({}). Maximum allowed is {}.",
+                    path.display(),
+                    file_text.chars().count(),
+                    MAX_WRITE_CHAR_COUNT
+                ),
+                None,
+            ));
+        }
+
+        // Save current file state for undo functionality
+        self.save_file_history(&path)?;
+
         // Normalize line endings based on platform
         let normalized_text = normalize_line_endings(&file_text);
 
@@ -129,14 +170,14 @@ impl TextEditor {
         }
 
         // Write to the file
-        std::fs::write(&path, normalized_text)
+        std::fs::write(&path, &normalized_text)
             .map_err(|e| McpError::internal_error(format!("Failed to write file: {}", e), None))?;
 
         // Try to detect the language from the file extension
         let language = lang::get_language_identifier(&path);
 
         let success_message = format!("Successfully wrote to {}", path.display());
-        let formatted = format!(
+        let formatted_output = format!(
             "### {}\n```{}\n{}\n```",
             path.display(),
             language,
@@ -145,7 +186,7 @@ impl TextEditor {
 
         Ok(CallToolResult::success(vec![
             Content::text(success_message).with_audience(vec![Role::Assistant]),
-            Content::text(formatted)
+            Content::text(formatted_output)
                 .with_audience(vec![Role::User])
                 .with_priority(0.2),
         ]))
@@ -278,13 +319,26 @@ impl TextEditor {
     fn save_file_history(&self, path: &PathBuf) -> Result<(), McpError> {
         let mut history = self.file_history.lock().unwrap();
         let content = if path.exists() {
+            if path.is_dir() {
+                // Don't save history for directories
+                return Ok(());
+            }
             std::fs::read_to_string(path).map_err(|e| {
-                McpError::internal_error(format!("Failed to read file: {}", e), None)
+                McpError::internal_error(format!("Failed to read file for history: {}", e), None)
             })?
         } else {
-            String::new()
+            String::new() // Represents a non-existent file
         };
-        history.entry(path.clone()).or_default().push(content);
+
+        let file_specific_history = history.entry(path.clone()).or_default();
+        file_specific_history.push(content);
+
+        // Enforce history limit
+        if file_specific_history.len() > self.max_history_per_file && self.max_history_per_file > 0
+        {
+            let excess = file_specific_history.len() - self.max_history_per_file;
+            file_specific_history.drain(0..excess);
+        }
         Ok(())
     }
 }
@@ -488,6 +542,181 @@ mod tests {
         // Should be able to view normal file
         let result = editor.view(normal_file.to_string_lossy().to_string()).await;
         assert!(result.is_ok(), "Should be able to view normal file");
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_write_undo_functionality() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.txt");
+
+        let editor = TextEditor::new();
+
+        // Write initial content
+        editor
+            .write(
+                test_file.to_string_lossy().to_string(),
+                "Initial content".to_string(),
+            )
+            .await
+            .unwrap();
+
+        // Write new content (should be undoable)
+        editor
+            .write(
+                test_file.to_string_lossy().to_string(),
+                "New content".to_string(),
+            )
+            .await
+            .unwrap();
+
+        // Verify new content
+        let view_result = editor.view(test_file.to_string_lossy().to_string()).await;
+        let call_result = view_result.unwrap();
+        let text = call_result.content[0].as_text().unwrap();
+        assert!(text.text.contains("New content"));
+
+        // Undo the write
+        let undo_result = editor
+            .undo_edit(test_file.to_string_lossy().to_string())
+            .await;
+        assert!(undo_result.is_ok());
+
+        // Verify content reverted
+        let view_result = editor.view(test_file.to_string_lossy().to_string()).await;
+        let call_result = view_result.unwrap();
+        let text = call_result.content[0].as_text().unwrap();
+        assert!(text.text.contains("Initial content"));
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_write_to_directory_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir_path = temp_dir.path().join("test_dir");
+        std::fs::create_dir(&dir_path).unwrap();
+
+        let editor = TextEditor::new();
+
+        // Try to write to a directory
+        let result = editor
+            .write(
+                dir_path.to_string_lossy().to_string(),
+                "content".to_string(),
+            )
+            .await;
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e.to_string().contains("is an existing directory"));
+        }
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_write_character_limit() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.txt");
+
+        let editor = TextEditor::new();
+
+        // Create content exceeding the character limit
+        let large_content = "x".repeat(MAX_WRITE_CHAR_COUNT + 1);
+
+        let result = editor
+            .write(test_file.to_string_lossy().to_string(), large_content)
+            .await;
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e.to_string().contains("too many characters"));
+        }
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_history_limit() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.txt");
+
+        // Create editor with small history limit
+        let editor = TextEditor::new_with_history_limit(2);
+
+        // Write initial content
+        editor
+            .write(
+                test_file.to_string_lossy().to_string(),
+                "Content 1".to_string(),
+            )
+            .await
+            .unwrap();
+
+        // Make multiple edits to exceed history limit
+        for i in 2..=5 {
+            editor
+                .str_replace(
+                    test_file.to_string_lossy().to_string(),
+                    format!("Content {}", i - 1),
+                    format!("Content {}", i),
+                )
+                .await
+                .unwrap();
+        }
+
+        // Should only be able to undo 2 times (the limit)
+        for _ in 0..2 {
+            let undo_result = editor
+                .undo_edit(test_file.to_string_lossy().to_string())
+                .await;
+            assert!(undo_result.is_ok());
+        }
+
+        // Third undo should fail
+        let undo_result = editor
+            .undo_edit(test_file.to_string_lossy().to_string())
+            .await;
+        assert!(undo_result.is_err());
+        if let Err(e) = undo_result {
+            assert!(e.to_string().contains("No edit history available"));
+        }
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_undo_write_to_new_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("new_file.txt");
+
+        let editor = TextEditor::new();
+
+        // Write to a new file
+        editor
+            .write(
+                test_file.to_string_lossy().to_string(),
+                "New file content".to_string(),
+            )
+            .await
+            .unwrap();
+
+        // Verify file exists and has content
+        assert!(test_file.exists());
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert_eq!(content, "New file content");
+
+        // Undo the write
+        let undo_result = editor
+            .undo_edit(test_file.to_string_lossy().to_string())
+            .await;
+        assert!(undo_result.is_ok());
+
+        // File should now be empty (representing the non-existent state)
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(content.is_empty());
 
         temp_dir.close().unwrap();
     }

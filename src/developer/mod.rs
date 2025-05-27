@@ -86,8 +86,15 @@ impl Developer {
                 .expect("Failed to create empty gitignore")
         }));
 
+        // Configure text editor history limit from environment or use default
+        let text_editor_max_history = std::env::var("TEXT_EDITOR_MAX_HISTORY")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(10);
+
         Self {
-            text_editor: TextEditor::new().with_ignore_patterns(ignore_patterns.clone()),
+            text_editor: TextEditor::new_with_history_limit(text_editor_max_history)
+                .with_ignore_patterns(ignore_patterns.clone()),
             shell: Shell::new().with_ignore_patterns(ignore_patterns),
             screen_capture: ScreenCapture::new(),
             image_processor: ImageProcessor::new(),
@@ -151,7 +158,7 @@ impl Developer {
         command: String,
         #[tool(param)]
         #[schemars(
-            description = "Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`."
+            description = "Absolute path to the file to operate on, e.g. `/repo/file.py`. For the `write` command, parent directories will be created if they do not exist."
         )]
         path: String,
         #[tool(param)]
