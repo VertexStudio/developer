@@ -36,7 +36,7 @@ tracing-subscriber = { version = "0.3", features = [
 tracing-appender = "0.2"
 
 # MCP SDK
-rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = [
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "915bc3fb37fe259fba1a853a9dd03566593f3310", features = [
     "client",
     "schemars",
     "transport-io",

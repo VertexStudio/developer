@@ -206,7 +206,7 @@ Once configured, you can use these tools directly in Claude Desktop:
 
 ```
 Developer MCP Server
-├── Text Editor      → File viewing, editing, string replacement, undo
+├── Text Editor     → File viewing, editing, string replacement, undo
 ├── Shell           → Cross-platform command execution  
 ├── Screen Capture  → Display and window screenshots
 ├── Image Processor → File-based image processing
