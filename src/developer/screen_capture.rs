@@ -28,7 +28,7 @@ impl ScreenCapture {
 
             let window = windows
                 .into_iter()
-                .find(|w| w.title().map_or(false, |title| title == window_title))
+                .find(|w| w.title() == window_title)
                 .ok_or_else(|| {
                     McpError::invalid_params(
                         format!("No window found with title '{}'", window_title),
@@ -105,15 +105,15 @@ impl ScreenCapture {
 
         for window in windows.iter() {
             // Skip minimized windows as they can't be captured anyway
-            if window.is_minimized().unwrap_or(false) {
+            if window.is_minimized() {
                 continue;
             }
 
-            let title = window.title().unwrap_or_else(|_| "<No Title>".to_string());
+            let title = window.title();
 
             // Only add non-empty titles
             if !title.is_empty() && title != "<No Title>" {
-                window_info.push(title);
+                window_info.push(title.to_string());
             }
         }
 
@@ -150,12 +150,12 @@ mod tests {
         let mut window_titles: Vec<String> = Vec::new();
 
         for window in windows.iter() {
-            if window.is_minimized().unwrap_or(false) {
+            if window.is_minimized() {
                 continue;
             }
-            let title = window.title().unwrap_or_else(|_| "<No Title>".to_string());
+            let title = window.title();
             if !title.is_empty() && title != "<No Title>" {
-                window_titles.push(title);
+                window_titles.push(title.to_string());
             }
         }
 

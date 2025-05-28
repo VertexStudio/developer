@@ -80,7 +80,11 @@ url = "2.5"
 shellexpand = "3.1"
 base64 = "0.22"
 image = "0.25"
-xcap = "0.6"
 serial_test = "3.2"
 tempfile = "3.20"
 regex = "1.11"
+
+# These dependencis are unstable, pinning for now
+xcap = "0.0.14"
+core-foundation = "=0.10.0"
+core-foundation-sys = "0.8.7"
