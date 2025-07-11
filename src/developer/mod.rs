@@ -1,10 +1,93 @@
 use ignore::gitignore::GitignoreBuilder;
 use rmcp::{
-    Error as McpError, RoleServer, ServerHandler, model::*, schemars, service::RequestContext, tool,
+    RoleServer, ServerHandler,
+    handler::server::{router::tool::ToolRouter, tool::Parameters},
+    model::ErrorData as McpError,
+    model::*,
+    schemars,
+    service::RequestContext,
+    tool, tool_handler, tool_router,
 };
 use serde_json::json;
 use std::env;
 use std::sync::Arc;
+
+// Tool descriptions (condensed from original markdown)
+
+// Parameter structs for tools
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TextEditorParams {
+    #[schemars(description = "Allowed options are: `view`, `write`, `str_replace`, `undo_edit`.")]
+    pub command: String,
+    #[schemars(
+        description = "Absolute path to the file to operate on, e.g. `/repo/file.py`. For the `write` command, parent directories will be created if they do not exist."
+    )]
+    pub path: String,
+    #[schemars(description = "Content to write to the file (required for write command)")]
+    pub file_text: Option<String>,
+    #[schemars(description = "String to replace (required for str_replace command)")]
+    pub old_str: Option<String>,
+    #[schemars(description = "New string to replace with (required for str_replace command)")]
+    pub new_str: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ShellParams {
+    #[schemars(description = "Command to execute")]
+    pub command: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ScreenCaptureParams {
+    #[schemars(description = "The display number to capture (0 is main display)")]
+    pub display: Option<i32>,
+    #[schemars(
+        description = "Optional: the exact title of the window to capture. use the list_windows tool to find the available windows."
+    )]
+    pub window_title: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ImageProcessorParams {
+    #[schemars(description = "Absolute path to the image file to process")]
+    pub path: String,
+    #[schemars(
+        description = "Optional resize factor to reduce image size. Allowed values: \"1/2\", \"1/4\""
+    )]
+    pub resize: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct WorkflowParams {
+    #[schemars(description = "Detailed description of what this step accomplishes")]
+    pub step_description: String,
+    #[schemars(description = "Current position in the workflow sequence (e.g., 1 for first step)")]
+    pub step_number: i32,
+    #[schemars(description = "Estimated total number of steps in the complete workflow")]
+    pub total_steps: i32,
+    #[schemars(
+        description = "Set to true if another step will follow this one, false if this is the final step"
+    )]
+    pub next_step_needed: bool,
+    #[schemars(description = "Set to true if this step revises a previous step")]
+    pub is_step_revision: Option<bool>,
+    #[schemars(
+        description = "If revising a previous step, specify which step number is being revised"
+    )]
+    pub revises_step: Option<i32>,
+    #[schemars(
+        description = "If creating a branch, specify which step number this branch starts from"
+    )]
+    pub branch_from_step: Option<i32>,
+    #[schemars(
+        description = "A unique identifier for this branch (required when creating a branch)"
+    )]
+    pub branch_id: Option<String>,
+    #[schemars(
+        description = "Indicates whether additional steps are required to complete the workflow"
+    )]
+    pub needs_more_steps: Option<bool>,
+}
 
 pub mod image_processor;
 pub mod lang;
@@ -62,9 +145,10 @@ pub struct Developer {
     screen_capture: ScreenCapture,
     image_processor: ImageProcessor,
     workflow: Workflow,
+    tool_router: ToolRouter<Developer>,
 }
 
-#[tool(tool_box)]
+#[tool_router]
 impl Developer {
     pub fn new() -> Self {
         let cwd = std::env::current_dir().expect("should have a current working dir");
@@ -99,11 +183,12 @@ impl Developer {
             screen_capture: ScreenCapture::new(),
             image_processor: ImageProcessor::new(),
             workflow: Workflow::new(true, None, true),
+            tool_router: Self::tool_router(),
         }
     }
 
     pub fn get_tools_schema_as_json() -> String {
-        let tools: Vec<rmcp::model::Tool> = Self::tool_box().list();
+        let tools: Vec<rmcp::model::Tool> = Self::tool_router().list_all();
         match serde_json::to_string_pretty(&tools) {
             Ok(json_string) => json_string,
             Err(e) => {
@@ -117,13 +202,6 @@ impl Developer {
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
         RawResource::new(uri, name.to_string()).no_annotation()
-    }
-
-    fn get_shell_description() -> &'static str {
-        match std::env::consts::OS {
-            "windows" => include_str!("descriptions/shell_windows.md"),
-            _ => include_str!("descriptions/shell_unix.md"),
-        }
     }
 
     // Helper method to resolve a path relative to cwd with platform-specific handling
@@ -148,28 +226,37 @@ impl Developer {
     }
 
     // Text Editor Tool
-    #[tool(description = include_str!("descriptions/text_editor.md"))]
+    #[tool(description = "Text Editor Tool: File Content Manipulation
+
+Provides commands to perform text editing operations on files, such as viewing, creating, overwriting, and modifying content, along with an undo capability for recent changes.
+
+Commands:
+- view: View the content of a file
+- write: Create or overwrite a file with the given content  
+- str_replace: Replace a specific string in a file with a new string
+- undo_edit: Undo the last edit made by write or str_replace to a file
+
+Parameters:
+- command (required): One of view, write, str_replace, undo_edit
+- path (required): Absolute path to the file to operate on
+- file_text (for write): The entire new content for the file
+- old_str (for str_replace): The exact string to be replaced (must be unique)
+- new_str (for str_replace): The string that will replace old_str
+
+Important Notes:
+- Files are limited to 400KB in size and 400,000 characters
+- write command completely replaces file content
+- str_replace requires exact and unique match of old_str
+- Undo history is maintained for recent changes per file")]
     async fn text_editor(
         &self,
-        #[tool(param)]
-        #[schemars(
-            description = "Allowed options are: `view`, `write`, `str_replace`, `undo_edit`."
-        )]
-        command: String,
-        #[tool(param)]
-        #[schemars(
-            description = "Absolute path to the file to operate on, e.g. `/repo/file.py`. For the `write` command, parent directories will be created if they do not exist."
-        )]
-        path: String,
-        #[tool(param)]
-        #[schemars(description = "Content to write to the file (required for write command)")]
-        file_text: Option<String>,
-        #[tool(param)]
-        #[schemars(description = "String to replace (required for str_replace command)")]
-        old_str: Option<String>,
-        #[tool(param)]
-        #[schemars(description = "New string to replace with (required for str_replace command)")]
-        new_str: Option<String>,
+        Parameters(TextEditorParams {
+            command,
+            path,
+            file_text,
+            old_str,
+            new_str,
+        }): Parameters<TextEditorParams>,
     ) -> Result<CallToolResult, McpError> {
         // Validate and resolve the path
         let resolved_path = self.resolve_path(&path)?;
@@ -203,12 +290,10 @@ impl Developer {
     }
 
     // Shell Tool
-    #[tool(description = Self::get_shell_description())]
+    #[tool(description = "Execute shell commands on the system")]
     async fn shell(
         &self,
-        #[tool(param)]
-        #[schemars(description = "Command to execute")]
-        command: String,
+        Parameters(ShellParams { command }): Parameters<ShellParams>,
     ) -> Result<CallToolResult, McpError> {
         self.shell.execute(command).await
     }
@@ -226,78 +311,72 @@ impl Developer {
     )]
     async fn screen_capture(
         &self,
-        #[tool(param)]
-        #[schemars(description = "The display number to capture (0 is main display)")]
-        display: Option<i32>,
-        #[tool(param)]
-        #[schemars(
-            description = "Optional: the exact title of the window to capture. use the list_windows tool to find the available windows."
-        )]
-        window_title: Option<String>,
+        Parameters(ScreenCaptureParams {
+            display,
+            window_title,
+        }): Parameters<ScreenCaptureParams>,
     ) -> Result<CallToolResult, McpError> {
         self.screen_capture.capture(display, window_title).await
     }
 
     // Image Processor Tool
     #[tool(
-        description = "Process an image file from disk. The image will be:\n1. Resized if larger than max width while maintaining aspect ratio\n2. Converted to PNG format\n3. Returned as base64 encoded data\n\nThis allows processing image files for use in the conversation."
+        description = "Process an image file from disk. The image will be:\n1. Resized if larger than max width while maintaining aspect ratio\n2. Optionally resized further by 1/2 or 1/4 to reduce file size\n3. Preserved in original format (JPEG stays JPEG, PNG stays PNG) for optimal compression\n4. Returned as base64 encoded data\n\nThis allows processing image files for use in the conversation."
     )]
     async fn image_processor(
         &self,
-        #[tool(param)]
-        #[schemars(description = "Absolute path to the image file to process")]
-        path: String,
+        Parameters(ImageProcessorParams { path, resize }): Parameters<ImageProcessorParams>,
     ) -> Result<CallToolResult, McpError> {
         // Validate and resolve the path
         let resolved_path = self.resolve_path(&path)?;
         let path_str = resolved_path.to_string_lossy().to_string();
 
-        self.image_processor.process(path_str).await
+        self.image_processor.process(path_str, resize).await
     }
 
     // Workflow Tools
-    #[tool(description = include_str!("descriptions/workflow.md"))]
+    #[tool(description = "Workflow Tool: Guiding Complex Problem-Solving
+
+Manages multi-step problem-solving processes with support for sequential progression, branching paths, and step revisions. This tool helps structure reasoning, explore alternatives, and adapt approaches as understanding evolves.
+
+When to Use:
+- Deconstruct complex problems into manageable steps
+- Plan and design iteratively with potential revisions
+- Explore multiple solution paths via branching
+- Perform in-depth analysis with course correction
+- Handle problems with unclear scope
+- Maintain long-term context across interactions
+
+Key Features:
+- Sequential Progression: Steps are tracked in order
+- Dynamic total_steps: Can be adjusted as workflow progresses
+- Branching: Create and switch between alternative solution paths
+- Step Revision: Mark steps that update or correct prior steps
+- Context Preservation: Workflow state maintained across calls
+
+Parameters:
+- step_description (required): Detailed description of what this step accomplishes
+- step_number (required): Current position in workflow sequence (≥1)
+- total_steps (required): Current best estimate of total steps needed
+- next_step_needed (required): True if another step will immediately follow
+- is_step_revision (optional): True if this step revises a previous step
+- revises_step (optional): Step number being revised if is_step_revision is true
+- branch_from_step (optional): Step number from which new branch originates
+- branch_id (optional): Unique identifier for the branch
+- needs_more_steps (optional): True if more steps needed for overall problem")]
     async fn workflow(
         &self,
-        #[tool(param)]
-        #[schemars(description = "Detailed description of what this step accomplishes")]
-        step_description: String,
-        #[tool(param)]
-        #[schemars(
-            description = "Current position in the workflow sequence (e.g., 1 for first step)"
-        )]
-        step_number: i32,
-        #[tool(param)]
-        #[schemars(description = "Estimated total number of steps in the complete workflow")]
-        total_steps: i32,
-        #[tool(param)]
-        #[schemars(
-            description = "Set to true if another step will follow this one, false if this is the final step"
-        )]
-        next_step_needed: bool,
-        #[tool(param)]
-        #[schemars(description = "Set to true if this step revises a previous step")]
-        is_step_revision: Option<bool>,
-        #[tool(param)]
-        #[schemars(
-            description = "If revising a previous step, specify which step number is being revised"
-        )]
-        revises_step: Option<i32>,
-        #[tool(param)]
-        #[schemars(
-            description = "If creating a branch, specify which step number this branch starts from"
-        )]
-        branch_from_step: Option<i32>,
-        #[tool(param)]
-        #[schemars(
-            description = "A unique identifier for this branch (required when creating a branch)"
-        )]
-        branch_id: Option<String>,
-        #[tool(param)]
-        #[schemars(
-            description = "Indicates whether additional steps are required to complete the workflow"
-        )]
-        needs_more_steps: Option<bool>,
+        Parameters(WorkflowParams {
+            step_description,
+            step_number,
+            total_steps,
+            next_step_needed,
+            is_step_revision,
+            revises_step,
+            branch_from_step,
+            branch_id,
+            needs_more_steps,
+        }): Parameters<WorkflowParams>,
     ) -> Result<CallToolResult, McpError> {
         use workflow::WorkflowStep;
 
@@ -317,7 +396,7 @@ impl Developer {
     }
 }
 
-#[tool(tool_box)]
+#[tool_handler]
 impl ServerHandler for Developer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {

@@ -26,7 +26,7 @@ tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }
 
 # Package-specific dependencies
-rig-core = "0.12.0"
+rig-core = "0.14.0"
 toml = { workspace = true }
 futures = { workspace = true }
 tracing-appender = { workspace = true }

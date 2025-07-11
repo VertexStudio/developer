@@ -1,5 +1,7 @@
 use rig::{
-    embeddings::EmbeddingsBuilder, providers::openai,
+    client::{CompletionClient, EmbeddingsClient, ProviderClient},
+    embeddings::EmbeddingsBuilder,
+    providers::openai,
     vector_store::in_memory_store::InMemoryVectorStore,
 };
 use tracing_appender::rolling::{RollingFileAppender, Rotation};

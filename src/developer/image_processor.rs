@@ -49,7 +49,11 @@ impl ImageProcessor {
         path.to_path_buf()
     }
 
-    pub async fn process(&self, path: String) -> Result<CallToolResult, McpError> {
+    pub async fn process(
+        &self,
+        path: String,
+        resize: Option<String>,
+    ) -> Result<CallToolResult, McpError> {
         let path = Path::new(&path);
 
         let path = {
@@ -107,23 +111,97 @@ impl ImageProcessor {
             ));
         }
 
-        // Convert to PNG and encode as base64
+        // Apply additional resize if requested
+        if let Some(ref resize_factor) = resize {
+            let resize_scale = match resize_factor.as_str() {
+                "1/2" => 0.5,
+                "1/4" => 0.25,
+                _ => {
+                    return Err(McpError::invalid_params(
+                        format!(
+                            "Invalid resize factor '{}'. Allowed values: '1/2', '1/4'",
+                            resize_factor
+                        ),
+                        None,
+                    ));
+                }
+            };
+
+            let new_width = (processed_image.width() as f32 * resize_scale) as u32;
+            let new_height = (processed_image.height() as f32 * resize_scale) as u32;
+
+            // Ensure minimum size of 1x1
+            let new_width = new_width.max(1);
+            let new_height = new_height.max(1);
+
+            processed_image = xcap::image::DynamicImage::ImageRgba8(xcap::image::imageops::resize(
+                &processed_image,
+                new_width,
+                new_height,
+                xcap::image::imageops::FilterType::Lanczos3,
+            ));
+        }
+
+        // Determine output format based on input format
+        let input_format =
+            xcap::image::ImageFormat::from_path(&path).unwrap_or(xcap::image::ImageFormat::Png);
+        let (output_format, mime_type) = match input_format {
+            xcap::image::ImageFormat::Jpeg => (xcap::image::ImageFormat::Jpeg, "image/jpeg"),
+            xcap::image::ImageFormat::WebP => (xcap::image::ImageFormat::Jpeg, "image/jpeg"), // Convert WebP to JPEG
+            _ => (xcap::image::ImageFormat::Png, "image/png"), // Keep PNG, BMP, etc. as PNG
+        };
+
+        // Convert to appropriate format and encode as base64
         let mut bytes: Vec<u8> = Vec::new();
-        processed_image
-            .write_to(&mut Cursor::new(&mut bytes), xcap::image::ImageFormat::Png)
-            .map_err(|e| {
-                McpError::internal_error(format!("Failed to write image buffer: {}", e), None)
-            })?;
+        let mut cursor = Cursor::new(&mut bytes);
+
+        match output_format {
+            xcap::image::ImageFormat::Jpeg => {
+                // Use JPEG with quality control for better compression
+                let quality = 85; // High quality but still compressed
+                let mut encoder =
+                    xcap::image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, quality);
+                let rgb_image = processed_image.to_rgb8();
+                encoder
+                    .encode(
+                        &rgb_image,
+                        rgb_image.width(),
+                        rgb_image.height(),
+                        xcap::image::ColorType::Rgb8.into(),
+                    )
+                    .map_err(|e| {
+                        McpError::internal_error(format!("Failed to encode JPEG: {}", e), None)
+                    })?;
+            }
+            _ => {
+                // Use PNG for other formats
+                processed_image
+                    .write_to(&mut cursor, xcap::image::ImageFormat::Png)
+                    .map_err(|e| {
+                        McpError::internal_error(format!("Failed to write PNG: {}", e), None)
+                    })?;
+            }
+        }
 
         let data = base64::prelude::BASE64_STANDARD.encode(bytes);
 
+        let resize_info = if let Some(ref resize_factor) = resize {
+            format!(" (resized by {})", resize_factor)
+        } else {
+            String::new()
+        };
+
         Ok(CallToolResult::success(vec![
             Content::text(format!(
-                "Successfully processed image from {}",
-                path.display()
+                "Successfully processed image from {}{}. Final dimensions: {}x{}, format: {}",
+                path.display(),
+                resize_info,
+                processed_image.width(),
+                processed_image.height(),
+                mime_type
             ))
             .with_audience(vec![Role::Assistant]),
-            Content::image(data, "image/png".to_string()).with_priority(0.0),
+            Content::image(data, mime_type.to_string()).with_priority(0.0),
         ]))
     }
 }
@@ -146,7 +224,7 @@ mod tests {
     async fn test_process_nonexistent_file() {
         let image_processor = ImageProcessor::new();
         let result = image_processor
-            .process("/nonexistent/file.png".to_string())
+            .process("/nonexistent/file.png".to_string(), None)
             .await;
         assert!(result.is_err());
         if let Err(e) = result {
@@ -166,7 +244,7 @@ mod tests {
 
         let image_processor = ImageProcessor::new();
         let result = image_processor
-            .process(large_file_path.to_string_lossy().to_string())
+            .process(large_file_path.to_string_lossy().to_string(), None)
             .await;
         assert!(result.is_err());
         if let Err(e) = result {
@@ -187,11 +265,36 @@ mod tests {
 
         let image_processor = ImageProcessor::new();
         let result = image_processor
-            .process(invalid_file_path.to_string_lossy().to_string())
+            .process(invalid_file_path.to_string_lossy().to_string(), None)
             .await;
         assert!(result.is_err());
         if let Err(e) = result {
             assert!(e.to_string().contains("Failed to open image file"));
+        }
+
+        temp_dir.close().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_invalid_resize_factor() {
+        // Create a temporary valid image file for testing resize validation
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file_path = temp_dir.path().join("test.png");
+
+        // Create a minimal valid PNG file (1x1 pixel)
+        let img = xcap::image::RgbImage::new(1, 1);
+        img.save(&test_file_path).unwrap();
+
+        let image_processor = ImageProcessor::new();
+        let result = image_processor
+            .process(
+                test_file_path.to_string_lossy().to_string(),
+                Some("1/3".to_string()),
+            )
+            .await;
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e.to_string().contains("Invalid resize factor"));
         }
 
         temp_dir.close().unwrap();
