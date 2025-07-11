@@ -24,6 +24,12 @@ pub struct TextEditor {
     max_history_per_file: usize,
 }
 
+impl Default for TextEditor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TextEditor {
     pub fn new() -> Self {
         Self {
@@ -51,8 +57,8 @@ impl TextEditor {
             if ignore_patterns.matched(path, false).is_ignore() {
                 return Err(McpError::invalid_request(
                     format!(
-                        "The file '{}' is restricted by ignore patterns",
-                        path.display()
+                        "The file '{display}' is restricted by ignore patterns",
+                        display = path.display()
                     ),
                     None,
                 ));
@@ -74,40 +80,40 @@ impl TextEditor {
 
             let file_size = std::fs::metadata(&path)
                 .map_err(|e| {
-                    McpError::internal_error(format!("Failed to get file metadata: {}", e), None)
+                    McpError::internal_error(format!("Failed to get file metadata: {e}"), None)
                 })?
                 .len();
 
             if file_size > MAX_FILE_SIZE {
                 return Err(McpError::invalid_params(
                     format!(
-                        "File '{}' is too large ({:.2}KB). Maximum size is 400KB to prevent memory issues.",
-                        path.display(),
-                        file_size as f64 / 1024.0
+                        "File '{display}' is too large ({size:.2}KB). Maximum size is 400KB to prevent memory issues.",
+                        display = path.display(),
+                        size = file_size as f64 / 1024.0
                     ),
                     None,
                 ));
             }
 
-            let content = std::fs::read_to_string(&path).map_err(|e| {
-                McpError::internal_error(format!("Failed to read file: {}", e), None)
-            })?;
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| McpError::internal_error(format!("Failed to read file: {e}"), None))?;
 
             let char_count = content.chars().count();
             if char_count > MAX_CHAR_COUNT {
                 return Err(McpError::invalid_params(
                     format!(
-                        "File '{}' has too many characters ({}). Maximum character count is {}.",
-                        path.display(),
-                        char_count,
-                        MAX_CHAR_COUNT
+                        "File '{display}' has too many characters ({char_count}). Maximum character count is {MAX_CHAR_COUNT}.",
+                        display = path.display()
                     ),
                     None,
                 ));
             }
 
             let language = lang::get_language_identifier(&path);
-            let formatted = format!("### {}\n```{}\n{}\n```", path.display(), language, content);
+            let formatted = format!(
+                "### {display}\n```{language}\n{content}\n```",
+                display = path.display()
+            );
 
             Ok(CallToolResult::success(vec![
                 Content::text(formatted.clone()).with_audience(vec![Role::Assistant]),
@@ -118,8 +124,8 @@ impl TextEditor {
         } else {
             Err(McpError::invalid_params(
                 format!(
-                    "The path '{}' does not exist or is not a file.",
-                    path.display()
+                    "The path '{display}' does not exist or is not a file.",
+                    display = path.display()
                 ),
                 None,
             ))
@@ -136,8 +142,8 @@ impl TextEditor {
         if path.is_dir() {
             return Err(McpError::invalid_params(
                 format!(
-                    "The path '{}' is an existing directory. The 'write' command can only target files.",
-                    path.display()
+                    "The path '{display}' is an existing directory. The 'write' command can only target files.",
+                    display = path.display()
                 ),
                 None,
             ));
@@ -147,10 +153,9 @@ impl TextEditor {
         if file_text.chars().count() > MAX_WRITE_CHAR_COUNT {
             return Err(McpError::invalid_params(
                 format!(
-                    "Input content for '{}' has too many characters ({}). Maximum allowed is {}.",
-                    path.display(),
-                    file_text.chars().count(),
-                    MAX_WRITE_CHAR_COUNT
+                    "Input content for '{display}' has too many characters ({char_count}). Maximum allowed is {MAX_WRITE_CHAR_COUNT}.",
+                    display = path.display(),
+                    char_count = file_text.chars().count()
                 ),
                 None,
             ));
@@ -165,23 +170,21 @@ impl TextEditor {
         // Create parent directories if they don't exist
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                McpError::internal_error(format!("Failed to create directories: {}", e), None)
+                McpError::internal_error(format!("Failed to create directories: {e}"), None)
             })?;
         }
 
         // Write to the file
         std::fs::write(&path, &normalized_text)
-            .map_err(|e| McpError::internal_error(format!("Failed to write file: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to write file: {e}"), None))?;
 
         // Try to detect the language from the file extension
         let language = lang::get_language_identifier(&path);
 
-        let success_message = format!("Successfully wrote to {}", path.display());
+        let success_message = format!("Successfully wrote to {display}", display = path.display());
         let formatted_output = format!(
-            "### {}\n```{}\n{}\n```",
-            path.display(),
-            language,
-            file_text
+            "### {display}\n```{language}\n{file_text}\n```",
+            display = path.display()
         );
 
         Ok(CallToolResult::success(vec![
@@ -207,8 +210,8 @@ impl TextEditor {
         if !path.exists() {
             return Err(McpError::invalid_params(
                 format!(
-                    "File '{}' does not exist, you can write a new file with the `write` command",
-                    path.display()
+                    "File '{display}' does not exist, you can write a new file with the `write` command",
+                    display = path.display()
                 ),
                 None,
             ));
@@ -216,7 +219,7 @@ impl TextEditor {
 
         // Read content
         let content = std::fs::read_to_string(&path)
-            .map_err(|e| McpError::internal_error(format!("Failed to read file: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to read file: {e}"), None))?;
 
         // Ensure 'old_str' appears exactly once
         if content.matches(&old_str).count() > 1 {
@@ -240,7 +243,7 @@ impl TextEditor {
         let new_content = content.replace(&old_str, &new_str);
         let normalized_content = normalize_line_endings(&new_content);
         std::fs::write(&path, &normalized_content)
-            .map_err(|e| McpError::internal_error(format!("Failed to write file: {}", e), None))?;
+            .map_err(|e| McpError::internal_error(format!("Failed to write file: {e}"), None))?;
 
         // Try to detect the language from the file extension
         let language = lang::get_language_identifier(&path);
@@ -270,12 +273,11 @@ impl TextEditor {
             .collect::<Vec<&str>>()
             .join("\n");
 
-        let output = format!("```{}\n{}\n```", language, snippet);
+        let output = format!("```{language}\n{snippet}\n```");
 
         let success_message = format!(
-            "The file {} has been edited, and the section now reads:\n{}\nReview the changes above for errors. Undo and edit the file again if necessary!",
-            path.display(),
-            output
+            "The file {display} has been edited, and the section now reads:\n{output}\nReview the changes above for errors. Undo and edit the file again if necessary!",
+            display = path.display()
         );
 
         Ok(CallToolResult::success(vec![
@@ -297,7 +299,7 @@ impl TextEditor {
             if let Some(previous_content) = contents.pop() {
                 // Write previous content back to file
                 std::fs::write(&path, previous_content).map_err(|e| {
-                    McpError::internal_error(format!("Failed to write file: {}", e), None)
+                    McpError::internal_error(format!("Failed to write file: {e}"), None)
                 })?;
                 Ok(CallToolResult::success(vec![Content::text(
                     "Undid the last edit",
@@ -324,7 +326,7 @@ impl TextEditor {
                 return Ok(());
             }
             std::fs::read_to_string(path).map_err(|e| {
-                McpError::internal_error(format!("Failed to read file for history: {}", e), None)
+                McpError::internal_error(format!("Failed to read file for history: {e}"), None)
             })?
         } else {
             String::new() // Represents a non-existent file
@@ -487,7 +489,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
 
         // Create ignore patterns
-        let mut builder = GitignoreBuilder::new(temp_dir.path().to_path_buf());
+        let mut builder = GitignoreBuilder::new(temp_dir.path());
         builder.add_line(None, "secret.txt").unwrap();
         builder.add_line(None, "*.env").unwrap();
         let ignore_patterns = Arc::new(builder.build().unwrap());
@@ -660,8 +662,8 @@ mod tests {
             editor
                 .str_replace(
                     test_file.to_string_lossy().to_string(),
-                    format!("Content {}", i - 1),
-                    format!("Content {}", i),
+                    format!("Content {prev}", prev = i - 1),
+                    format!("Content {i}"),
                 )
                 .await
                 .unwrap();

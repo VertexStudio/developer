@@ -10,6 +10,12 @@ use xcap::{Monitor, Window};
 #[derive(Clone)]
 pub struct ScreenCapture;
 
+impl Default for ScreenCapture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScreenCapture {
     pub fn new() -> Self {
         Self
@@ -31,14 +37,14 @@ impl ScreenCapture {
                 .find(|w| w.title() == window_title)
                 .ok_or_else(|| {
                     McpError::invalid_params(
-                        format!("No window found with title '{}'", window_title),
+                        format!("No window found with title '{window_title}'"),
                         None,
                     )
                 })?;
 
             window.capture_image().map_err(|e| {
                 McpError::internal_error(
-                    format!("Failed to capture window '{}': {}", window_title, e),
+                    format!("Failed to capture window '{window_title}': {e}"),
                     None,
                 )
             })?
@@ -62,7 +68,7 @@ impl ScreenCapture {
 
             monitor.capture_image().map_err(|e| {
                 McpError::internal_error(
-                    format!("Failed to capture display {}: {}", display_num, e),
+                    format!("Failed to capture display {display_num}: {e}"),
                     None,
                 )
             })?
@@ -85,7 +91,7 @@ impl ScreenCapture {
         image
             .write_to(&mut Cursor::new(&mut bytes), xcap::image::ImageFormat::Png)
             .map_err(|e| {
-                McpError::internal_error(format!("Failed to write image buffer {}", e), None)
+                McpError::internal_error(format!("Failed to write image buffer {e}"), None)
             })?;
 
         // Convert to base64
@@ -165,7 +171,7 @@ mod tests {
         } else {
             println!("Available windows:");
             for title in window_titles {
-                println!("{}", title);
+                println!("{title}");
             }
         }
         println!("=== END WINDOW LIST ===");

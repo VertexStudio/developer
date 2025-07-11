@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::{self, EnvFilter};
 
-pub mod counter;
 pub mod developer;
 
 #[derive(Parser)]
@@ -29,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Toolbox) => {
             // Output only the tools JSON schema, no logging or other output
             let tools_schema = developer::Developer::get_tools_schema_as_json();
-            println!("{}", tools_schema);
+            println!("{tools_schema}");
             return Ok(());
         }
         None => {

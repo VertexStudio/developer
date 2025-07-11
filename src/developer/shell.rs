@@ -48,6 +48,12 @@ pub struct Shell {
     ignore_patterns: Option<Arc<Gitignore>>,
 }
 
+impl Default for Shell {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Shell {
     pub fn new() -> Self {
         Self {
@@ -93,8 +99,7 @@ impl Shell {
                 if ignore_patterns.matched(path, false).is_ignore() {
                     return Err(McpError::invalid_request(
                         format!(
-                            "The command attempts to access '{}' which is restricted by ignore patterns",
-                            arg
+                            "The command attempts to access '{arg}' which is restricted by ignore patterns"
                         ),
                         None,
                     ));
@@ -120,13 +125,11 @@ impl Shell {
             .arg(&self.config.arg)
             .arg(cmd_with_redirect)
             .spawn()
-            .map_err(|e| {
-                McpError::internal_error(format!("Failed to spawn command: {}", e), None)
-            })?;
+            .map_err(|e| McpError::internal_error(format!("Failed to spawn command: {e}"), None))?;
 
         // Wait for the command to complete and get output
         let output = child.wait_with_output().await.map_err(|e| {
-            McpError::internal_error(format!("Failed to wait for command: {}", e), None)
+            McpError::internal_error(format!("Failed to wait for command: {e}"), None)
         })?;
 
         let stdout_str = String::from_utf8_lossy(&output.stdout);
@@ -138,7 +141,7 @@ impl Shell {
         } else if stdout_str.is_empty() {
             stderr_str.to_string()
         } else {
-            format!("{}{}", stdout_str, stderr_str)
+            format!("{stdout_str}{stderr_str}")
         };
 
         let normalized_output = normalize_line_endings(&combined_output);
@@ -149,8 +152,7 @@ impl Shell {
         if char_count > MAX_CHAR_COUNT {
             return Err(McpError::invalid_params(
                 format!(
-                    "Shell output from command '{}' has too many characters ({}). Maximum character count is {}.",
-                    command, char_count, MAX_CHAR_COUNT
+                    "Shell output from command '{command}' has too many characters ({char_count}). Maximum character count is {MAX_CHAR_COUNT}."
                 ),
                 None,
             ));
@@ -177,11 +179,7 @@ mod tests {
     async fn test_shell_basic_execution() {
         let shell = Shell::new();
 
-        let result = if cfg!(windows) {
-            shell.execute("echo hello".to_string()).await
-        } else {
-            shell.execute("echo hello".to_string()).await
-        };
+        let result = shell.execute("echo hello".to_string()).await;
 
         assert!(result.is_ok());
     }
@@ -193,7 +191,7 @@ mod tests {
         std::env::set_current_dir(&temp_dir).unwrap();
 
         // Create ignore patterns
-        let mut builder = GitignoreBuilder::new(temp_dir.path().to_path_buf());
+        let mut builder = GitignoreBuilder::new(temp_dir.path());
         builder.add_line(None, "secret.txt").unwrap();
         let ignore_patterns = Arc::new(builder.build().unwrap());
 

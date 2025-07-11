@@ -73,8 +73,8 @@ impl Workflow {
         if let Some(max) = self.max_steps {
             if args.step_number > max {
                 let error_msg = format!(
-                    "Step number {} exceeds configured maximum of {}",
-                    args.step_number, max
+                    "Step number {step_number} exceeds configured maximum of {max}",
+                    step_number = args.step_number
                 );
                 if self.log_steps {
                     tracing::warn!(error_msg, "Workflow step validation error");
@@ -127,10 +127,8 @@ impl Workflow {
             }
 
             if *branch_from_step <= 0 || *branch_from_step > state.step_history.len() as i32 {
-                let error_msg = format!(
-                    "branch_from_step {} does not exist in step history",
-                    branch_from_step
-                );
+                let error_msg =
+                    format!("branch_from_step {branch_from_step} does not exist in step history");
                 if self.log_steps {
                     tracing::warn!(error_msg, "Workflow branching validation error");
                 }
@@ -189,7 +187,7 @@ impl Workflow {
                 if self.log_steps {
                     tracing::error!(error = %e, "Failed to serialize workflow status response");
                 }
-                Ok(Self::error(format!("Failed to serialize response: {}", e)))
+                Ok(Self::error(format!("Failed to serialize response: {e}")))
             }
         }
     }
@@ -250,7 +248,7 @@ mod tests {
                 let status = response.unwrap();
                 assert_eq!(status.step_number, 1);
                 assert_eq!(status.total_steps, 3);
-                assert_eq!(status.next_step_needed, true);
+                assert!(status.next_step_needed);
                 assert_eq!(status.step_history_length, 1);
                 assert!(status.branches.is_empty());
             }
@@ -304,14 +302,14 @@ mod tests {
     #[test]
     fn test_workflow_creation() {
         let tool = Workflow::new(true, Some(10), true);
-        assert_eq!(tool.allow_branches, true);
+        assert!(tool.allow_branches);
         assert_eq!(tool.max_steps, Some(10));
-        assert_eq!(tool.log_steps, true);
+        assert!(tool.log_steps);
 
         let default_tool = Workflow::default();
-        assert_eq!(default_tool.allow_branches, true);
+        assert!(default_tool.allow_branches);
         assert_eq!(default_tool.max_steps, None);
-        assert_eq!(default_tool.log_steps, true);
+        assert!(default_tool.log_steps);
     }
 
     #[tokio::test]

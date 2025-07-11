@@ -9,6 +9,12 @@ use std::{io::Cursor, path::Path};
 #[derive(Clone)]
 pub struct ImageProcessor;
 
+impl Default for ImageProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImageProcessor {
     pub fn new() -> Self {
         Self
@@ -58,7 +64,7 @@ impl ImageProcessor {
 
         let path = {
             if cfg!(target_os = "macos") {
-                Self::normalize_mac_screenshot_path(&path)
+                Self::normalize_mac_screenshot_path(path)
             } else {
                 path.to_path_buf()
             }
@@ -76,7 +82,7 @@ impl ImageProcessor {
         const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB in bytes
         let file_size = std::fs::metadata(&path)
             .map_err(|e| {
-                McpError::internal_error(format!("Failed to get file metadata: {}", e), None)
+                McpError::internal_error(format!("Failed to get file metadata: {e}"), None)
             })?
             .len();
 
@@ -94,7 +100,7 @@ impl ImageProcessor {
 
         // Open and decode the image
         let image = xcap::image::open(&path).map_err(|e| {
-            McpError::internal_error(format!("Failed to open image file: {}", e), None)
+            McpError::internal_error(format!("Failed to open image file: {e}"), None)
         })?;
 
         // Resize if necessary (same logic as screen_capture)
@@ -119,8 +125,7 @@ impl ImageProcessor {
                 _ => {
                     return Err(McpError::invalid_params(
                         format!(
-                            "Invalid resize factor '{}'. Allowed values: '1/2', '1/4'",
-                            resize_factor
+                            "Invalid resize factor '{resize_factor}'. Allowed values: '1/2', '1/4'"
                         ),
                         None,
                     ));
@@ -170,7 +175,7 @@ impl ImageProcessor {
                         xcap::image::ColorType::Rgb8.into(),
                     )
                     .map_err(|e| {
-                        McpError::internal_error(format!("Failed to encode JPEG: {}", e), None)
+                        McpError::internal_error(format!("Failed to encode JPEG: {e}"), None)
                     })?;
             }
             _ => {
@@ -178,7 +183,7 @@ impl ImageProcessor {
                 processed_image
                     .write_to(&mut cursor, xcap::image::ImageFormat::Png)
                     .map_err(|e| {
-                        McpError::internal_error(format!("Failed to write PNG: {}", e), None)
+                        McpError::internal_error(format!("Failed to write PNG: {e}"), None)
                     })?;
             }
         }
@@ -186,7 +191,7 @@ impl ImageProcessor {
         let data = base64::prelude::BASE64_STANDARD.encode(bytes);
 
         let resize_info = if let Some(ref resize_factor) = resize {
-            format!(" (resized by {})", resize_factor)
+            format!(" (resized by {resize_factor})")
         } else {
             String::new()
         };
@@ -214,7 +219,7 @@ mod tests {
     #[test]
     fn test_normalize_mac_screenshot_path() {
         let path = std::path::Path::new("Screenshot 2023-12-01 at 10.30.45 AM.png");
-        let normalized = ImageProcessor::normalize_mac_screenshot_path(&path);
+        let normalized = ImageProcessor::normalize_mac_screenshot_path(path);
 
         // Should return a path (exact behavior depends on regex matching)
         assert!(normalized.file_name().is_some());

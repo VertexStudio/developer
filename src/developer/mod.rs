@@ -148,6 +148,12 @@ pub struct Developer {
     tool_router: ToolRouter<Developer>,
 }
 
+impl Default for Developer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[tool_router]
 impl Developer {
     pub fn new() -> Self {
@@ -192,10 +198,7 @@ impl Developer {
         match serde_json::to_string_pretty(&tools) {
             Ok(json_string) => json_string,
             Err(e) => {
-                format!(
-                    "{{\"error\": \"Failed to serialize tools to JSON: {}\"}}",
-                    e
-                )
+                format!("{{\"error\": \"Failed to serialize tools to JSON: {e}\"}}")
             }
         }
     }
@@ -216,8 +219,7 @@ impl Developer {
             true => Ok(path.to_path_buf()),
             false => Err(McpError::invalid_params(
                 format!(
-                    "The path {} is not an absolute path, did you possibly mean {}?",
-                    path_str,
+                    "The path {path_str} is not an absolute path, did you possibly mean {}?",
                     suggestion.to_string_lossy(),
                 ),
                 None,
@@ -533,7 +535,6 @@ mod tests {
     fn test_developer_creation() {
         let _developer = Developer::new();
         // Just ensure it can be created without panicking
-        assert!(true);
     }
 
     #[test]
